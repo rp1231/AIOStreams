@@ -354,7 +354,9 @@ pub fn run(app: App) {
     video.resize(size.width, size.height);
     // Page pixels to the window's, beyond the screen's scale: the video follows the page's zoom.
     let mut zoom = 1.0;
-    if args.tv {
+    // The TV layout, which the page can switch on and off as it runs.
+    let mut tv = args.tv;
+    if tv {
         zoom = tv_zoom(&window);
         let _ = webview.zoom(zoom);
     }
@@ -402,7 +404,7 @@ pub fn run(app: App) {
             let size = window.inner_size();
             video.resize(size.width, size.height);
             let _ = webview.set_bounds(page_bounds(size));
-            if args.tv {
+            if tv {
                 zoom = tv_zoom(&window);
                 let _ = webview.zoom(zoom);
             }
@@ -439,7 +441,7 @@ pub fn run(app: App) {
                 passing = None;
                 video.resize(size.width, size.height);
                 let _ = webview.set_bounds(page_bounds(size));
-                if args.tv {
+                if tv {
                     zoom = tv_zoom(&window);
                     let _ = webview.zoom(zoom);
                 }
@@ -571,6 +573,11 @@ pub fn run(app: App) {
                     };
                     passing = target.map(|size| (Instant::now() + PASSING, size));
                 }
+            }
+            Event::UserEvent(UserEvent::TvLayout(on)) => {
+                tv = on;
+                zoom = if tv { tv_zoom(&window) } else { 1.0 };
+                let _ = webview.zoom(zoom);
             }
             Event::UserEvent(UserEvent::Pip(value)) => {
                 let on = value.unwrap_or(pip.is_none());

@@ -28,6 +28,8 @@ use updates::{Command, Updater};
 pub enum UserEvent {
     Emit(String),
     Fullscreen(Option<bool>),
+    /// The page switched its TV layout on or off.
+    TvLayout(bool),
     Pip(Option<bool>),
     VideoFrame(Option<VideoFrame>),
     Minimize,
@@ -231,6 +233,23 @@ pub struct Paths {
     download_folder: PathBuf,
     /// The upscaling shader, which mpv only reads from a file.
     upscaling_hook: PathBuf,
+    /// Whether the page last chose the TV layout, so the next start opens at its zoom.
+    tv_layout: PathBuf,
+}
+
+/// The layout the page last chose, if it has.
+fn load_tv_layout(path: &Path) -> Option<bool> {
+    match std::fs::read_to_string(path).ok()?.trim() {
+        "tv" => Some(true),
+        "desktop" => Some(false),
+        _ => None,
+    }
+}
+
+fn save_tv_layout(path: &Path, on: bool) {
+    if let Err(e) = std::fs::write(path, if on { "tv" } else { "desktop" }) {
+        log::warn!("could not save the layout to {}: {e}", path.display());
+    }
 }
 
 pub struct App {
@@ -335,7 +354,11 @@ fn main() {
         downloads: data_dir.join("downloads.json"),
         download_folder,
         upscaling_hook: data_dir.join("upscaling.glsl"),
+        tv_layout: data_dir.join("layout"),
     });
+    // The layout chosen in the page's settings wins over --tv, which only picks the first one.
+    let mut args = args;
+    args.tv = load_tv_layout(&paths.tv_layout).unwrap_or(args.tv);
     let bridge = bridge_script(args.tv);
     shell::run(App {
         args,
@@ -705,6 +728,10 @@ pub fn handle(
         },
         Inbound::ExternalClose => external.close(),
         Inbound::Fullscreen { value } => send(UserEvent::Fullscreen(value)),
+        Inbound::TvLayout { value } => {
+            save_tv_layout(&paths.tv_layout, value);
+            send(UserEvent::TvLayout(value));
+        }
         Inbound::Pip { value } => send(UserEvent::Pip(value)),
         Inbound::PlayerFrame { frame } => {
             if let Some(p) = player.as_ref() {

@@ -148,6 +148,8 @@ impl Shell {
                     self.window.unfullscreen();
                 }
             }
+            // The page lays itself out; this window doesn't zoom it.
+            UserEvent::TvLayout(_) => {}
             UserEvent::Minimize => self.window.minimize(),
             UserEvent::Close => self.close(),
             UserEvent::Closed => {}

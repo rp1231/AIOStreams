@@ -1,7 +1,9 @@
 import { t } from '@lingui/core/macro';
 import { Select } from '@aiostreams/ui/select';
+import { Switch } from '@aiostreams/ui/switch';
 import { dateFormat } from '@/lib/format';
 import { currentHost } from '@/lib/hosts';
+import { setTvLayout } from '@/lib/hosts/shell/desktop';
 import { HIDDEN_LOCALES, LOCALES, localeName, systemLocale } from '@/lib/i18n';
 import {
   settings,
@@ -195,6 +197,22 @@ function sampleTime(cycle: 'h12' | 'h23'): string {
   }).format(at);
 }
 
+/** The desktop app's TV layout, for a computer by the TV. */
+function LayoutCard() {
+  if (currentHost().name !== 'desktop') return null;
+  return (
+    <SettingsCard name="layout" title={t`Layout`} holds="local">
+      <Switch
+        side="right"
+        label={t`TV layout`}
+        help={t`Lays the app out for a TV across the room, with bigger text and pages made for a remote, the arrow keys or a gamepad. The app reloads to switch.`}
+        value={!!currentHost().tv}
+        onValueChange={setTvLayout}
+      />
+    </SettingsCard>
+  );
+}
+
 /** The app's own language and clock, each user's. */
 function LanguageCard() {
   const [timeFormat, setTimeFormat] = useSetting(settings.interface.timeFormat);
@@ -234,6 +252,7 @@ function LanguageCard() {
 export function InterfaceSection() {
   return (
     <>
+      <LayoutCard />
       <LanguageCard />
       <NavigationCard />
     </>

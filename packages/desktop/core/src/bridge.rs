@@ -158,6 +158,10 @@ pub enum Inbound {
     Fullscreen {
         value: Option<bool>,
     },
+    /// The page's TV layout on or off, which the window zooms to and keeps for the next start.
+    TvLayout {
+        value: bool,
+    },
     /// Shrinks the window to the video, over other windows; `None` toggles.
     Pip {
         value: Option<bool>,

@@ -772,6 +772,11 @@ export const settings = {
     pip: device<boolean>('aiostreams-web-app-pip', true, undefined, [
       'aiostreams-android-pip',
     ]),
+    /** The desktop app laid out as on a TV; until chosen, as the app started (`--tv`). */
+    tvLayout: device<boolean>(
+      'aiostreams-web-app-tv-layout',
+      () => appBridge()?.tv === true
+    ),
     background: device<boolean>(
       'aiostreams-web-app-background',
       false,
