@@ -522,3 +522,37 @@ pub fn origin(url: &str) -> Option<String> {
         Some(format!("{}://{}", url.scheme(), url.host_str()?))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_tv_layout_switch_both_ways() {
+        for on in [true, false] {
+            let body = format!(r#"{{"type":"tv-layout","value":{on}}}"#);
+            assert!(
+                matches!(parse(&body), Some(Inbound::TvLayout { value }) if value == on),
+                "{body}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_a_tv_layout_switch_without_a_value() {
+        assert!(parse(r#"{"type":"tv-layout"}"#).is_none());
+        assert!(parse(r#"{"type":"tv-layout","value":"tv"}"#).is_none());
+    }
+
+    #[test]
+    fn reads_full_screen_as_a_toggle_or_a_value() {
+        assert!(matches!(
+            parse(r#"{"type":"fullscreen"}"#),
+            Some(Inbound::Fullscreen { value: None })
+        ));
+        assert!(matches!(
+            parse(r#"{"type":"fullscreen","value":false}"#),
+            Some(Inbound::Fullscreen { value: Some(false) })
+        ));
+    }
+}

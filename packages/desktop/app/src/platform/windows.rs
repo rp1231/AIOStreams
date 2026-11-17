@@ -131,17 +131,21 @@ pub fn screen_normal_rect(window: &Window) -> Option<NormalRect> {
         };
         (outer, content)
     };
-    // Workspace coordinates start at the work area's corner, past a taskbar on the left or top.
-    let (dx, dy) = (
-        info.rcWork.left - info.rcMonitor.left,
-        info.rcWork.top - info.rcMonitor.top,
-    );
-    Some(NormalRect {
-        left: info.rcMonitor.left - (content.left - outer.left) - dx,
-        top: info.rcMonitor.top - (content.top - outer.top) - dy,
-        right: info.rcMonitor.right + (outer.right - content.right) - dx,
-        bottom: info.rcMonitor.bottom + (outer.bottom - content.bottom) - dy,
-    })
+    Some(screen_rect(info.rcMonitor, info.rcWork, outer, content))
+}
+
+/// The screen as a restore rectangle for a window whose frame reaches `outer`
+/// around its `content`, all in screen coordinates: grown by the frame so the
+/// content covers the screen, and moved into workspace coordinates, which start
+/// at the work area's corner, past a taskbar on the left or top.
+fn screen_rect(monitor: RECT, work: RECT, outer: RECT, content: RECT) -> NormalRect {
+    let (dx, dy) = (work.left - monitor.left, work.top - monitor.top);
+    NormalRect {
+        left: monitor.left - (content.left - outer.left) - dx,
+        top: monitor.top - (content.top - outer.top) - dy,
+        right: monitor.right + (outer.right - content.right) - dx,
+        bottom: monitor.bottom + (outer.bottom - content.bottom) - dy,
+    }
 }
 
 /// Set before any window opens.
@@ -915,5 +919,70 @@ pub fn load_vulkan_loader(libmpv: &Path) {
         log::warn!("could not load {}: {error}", bundled.display());
     } else {
         log::info!("Windows has no vulkan-1.dll; loaded {}", bundled.display());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+        RECT {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    fn same(a: RECT, b: RECT) -> bool {
+        (a.left, a.top, a.right, a.bottom) == (b.left, b.top, b.right, b.bottom)
+    }
+
+    /// A 4K screen.
+    const MONITOR: RECT = rect(0, 0, 3840, 2160);
+    /// A frameless window's content, the whole of its rectangle.
+    const NO_FRAME: RECT = rect(0, 0, 100, 100);
+    /// Invisible resize borders of 11 at the sides and 13 at the bottom, as measured.
+    const FRAME_OUTER: RECT = rect(-11, 0, 111, 113);
+    const FRAME_CONTENT: RECT = rect(0, 0, 100, 100);
+
+    #[test]
+    fn without_a_frame_the_rectangle_is_the_screen() {
+        let work = rect(0, 0, 3840, 2088);
+        let got = screen_rect(MONITOR, work, NO_FRAME, NO_FRAME);
+        assert!(same(got, MONITOR));
+    }
+
+    #[test]
+    fn the_frame_reaches_past_the_screen_so_the_content_covers_it() {
+        let work = rect(0, 0, 3840, 2088);
+        let got = screen_rect(MONITOR, work, FRAME_OUTER, FRAME_CONTENT);
+        assert!(same(got, rect(-11, 0, 3851, 2173)));
+        // Less the frame, the content is the whole screen.
+        let content = rect(got.left + 11, got.top, got.right - 11, got.bottom - 13);
+        assert!(same(content, MONITOR));
+    }
+
+    #[test]
+    fn a_taskbar_on_the_left_moves_the_workspace_origin() {
+        let work = rect(72, 0, 3840, 2160);
+        let got = screen_rect(MONITOR, work, NO_FRAME, NO_FRAME);
+        assert!(same(got, rect(-72, 0, 3768, 2160)));
+    }
+
+    #[test]
+    fn a_taskbar_on_top_moves_the_workspace_origin() {
+        let work = rect(0, 48, 3840, 2160);
+        let got = screen_rect(MONITOR, work, FRAME_OUTER, FRAME_CONTENT);
+        assert!(same(got, rect(-11, -48, 3851, 2125)));
+    }
+
+    #[test]
+    fn a_second_screen_keeps_its_own_position() {
+        let monitor = rect(3840, -200, 5760, 880);
+        let work = rect(3840, -200, 5760, 840);
+        let got = screen_rect(monitor, work, NO_FRAME, NO_FRAME);
+        assert!(same(got, monitor));
     }
 }

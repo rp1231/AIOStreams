@@ -69,6 +69,10 @@ pub struct Args {
 }
 
 fn args() -> Args {
+    args_from(std::env::args().skip(1))
+}
+
+fn args_from(given: impl IntoIterator<Item = String>) -> Args {
     let mut args = Args {
         web: None,
         web_dir: None,
@@ -77,7 +81,7 @@ fn args() -> Args {
         link: None,
         tv: false,
     };
-    let mut it = std::env::args().skip(1);
+    let mut it = given.into_iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--web" => args.web = it.next(),
@@ -246,6 +250,11 @@ fn load_tv_layout(path: &Path) -> Option<bool> {
     }
 }
 
+/// The layout to open in: the page's last choice, or `--tv` until it has made one.
+fn starting_tv_layout(path: &Path, flag: bool) -> bool {
+    load_tv_layout(path).unwrap_or(flag)
+}
+
 fn save_tv_layout(path: &Path, on: bool) {
     if let Err(e) = std::fs::write(path, if on { "tv" } else { "desktop" }) {
         log::warn!("could not save the layout to {}: {e}", path.display());
@@ -358,7 +367,7 @@ fn main() {
     });
     // The layout chosen in the page's settings wins over --tv, which only picks the first one.
     let mut args = args;
-    args.tv = load_tv_layout(&paths.tv_layout).unwrap_or(args.tv);
+    args.tv = starting_tv_layout(&paths.tv_layout, args.tv);
     let bridge = bridge_script(args.tv);
     shell::run(App {
         args,
@@ -847,4 +856,101 @@ pub fn handle(
 
 fn page_text(message: &str) -> String {
     message.chars().take(MAX_PAGE_TEXT).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A file path of its own in the system's temporary folder, removed after the test.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "aiostreams-desktop-test-{}-{name}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn file(&self) -> PathBuf {
+            self.0.join("layout")
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn given(args: &[&str]) -> Args {
+        args_from(args.iter().map(|a| a.to_string()))
+    }
+
+    #[test]
+    fn tv_flag_turns_the_tv_layout_on() {
+        assert!(given(&["--tv"]).tv);
+        assert!(!given(&[]).tv);
+        assert!(given(&["--devtools", "--tv", "--remote-debugging-port", "9222"]).tv);
+    }
+
+    #[test]
+    fn tv_flag_leaves_the_other_arguments_alone() {
+        let args = given(&[
+            "--tv",
+            "--remote-debugging-port",
+            "9222",
+            "--web",
+            "http://x",
+        ]);
+        assert_eq!(args.debug_port, Some(9222));
+        assert_eq!(args.web.as_deref(), Some("http://x"));
+    }
+
+    #[test]
+    fn saved_layout_reads_back() {
+        let scratch = Scratch::new("round-trip");
+        for on in [true, false, true] {
+            save_tv_layout(&scratch.file(), on);
+            assert_eq!(load_tv_layout(&scratch.file()), Some(on));
+        }
+    }
+
+    #[test]
+    fn no_saved_layout_follows_the_flag() {
+        let scratch = Scratch::new("missing");
+        assert_eq!(load_tv_layout(&scratch.file()), None);
+        assert!(starting_tv_layout(&scratch.file(), true));
+        assert!(!starting_tv_layout(&scratch.file(), false));
+    }
+
+    #[test]
+    fn saved_layout_wins_over_the_flag() {
+        let scratch = Scratch::new("wins");
+        save_tv_layout(&scratch.file(), false);
+        assert!(!starting_tv_layout(&scratch.file(), true));
+        save_tv_layout(&scratch.file(), true);
+        assert!(starting_tv_layout(&scratch.file(), false));
+    }
+
+    #[test]
+    fn unreadable_saved_layout_follows_the_flag() {
+        let scratch = Scratch::new("garbage");
+        for text in ["", "yes", "TV", "1"] {
+            std::fs::write(scratch.file(), text).unwrap();
+            assert_eq!(load_tv_layout(&scratch.file()), None, "{text:?}");
+            assert!(starting_tv_layout(&scratch.file(), true), "{text:?}");
+        }
+        // A trailing newline, as an editor leaves, still reads.
+        std::fs::write(
+            scratch.file(),
+            "desktop
+",
+        )
+        .unwrap();
+        assert_eq!(load_tv_layout(&scratch.file()), Some(false));
+    }
 }
