@@ -29,8 +29,94 @@ function onContextMenu(e: MouseEvent) {
 
 let windowFullscreen = false;
 
+/** The way the window is going, from a request until the page takes the new size. */
+let expected: { into: boolean; until: number } | null = null;
+
+function sendFullscreen(value?: boolean): void {
+  const shell = appBridge();
+  if (!shell) return;
+  expected = {
+    into: value ?? !windowFullscreen,
+    until: performance.now() + 500,
+  };
+  shell.send(
+    value === undefined ? { type: 'fullscreen' } : { type: 'fullscreen', value }
+  );
+}
+
 export function leaveWindowFullscreen(): void {
-  if (windowFullscreen) appBridge()?.send({ type: 'fullscreen', value: false });
+  if (windowFullscreen) sendFullscreen(false);
+}
+
+/** The desktop app's window in and out of full screen, on any screen; false elsewhere. */
+export function toggleWindowFullscreen(): boolean {
+  const shell = appBridge();
+  if (!shell || shell.platform === 'android') return false;
+  sendFullscreen();
+  return true;
+}
+
+export function exitWindowFullscreen(): void {
+  sendFullscreen(false);
+}
+
+// The window's own corner, which stays put as it changes size.
+// eslint-disable-next-line lingui/no-unlocalized-strings -- a CSS value
+const PINNED = 'top left';
+
+// A strong ease-out: the edge is nearly there at once and settles gently.
+const SETTLE_EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
+
+/** The page's size before the last resize, which the window's edges moved from. */
+let pageSize = { width: window.innerWidth, height: window.innerHeight };
+
+/** How far an edge may appear to travel, so a small window doesn't squash the page. */
+const clampStretch = (ratio: number) => Math.min(1.05, Math.max(0.95, ratio));
+
+/**
+ * The page follows the window's edges instead of jumping to the new size: it
+ * starts at the size it had, pinned to the window's top left like the window
+ * itself, and stretches out with the bottom edge into full screen or draws back
+ * with it. It starts in the resize, before the browser draws the new size, so
+ * no frame shows the jump. The player is left alone, as the video beneath it
+ * doesn't move with the page, and reduced motion gets the plain switch.
+ */
+function followEdges(
+  into: boolean,
+  from: { width: number; height: number }
+): void {
+  const root = document.getElementById('root');
+  if (
+    !root ||
+    document.documentElement.classList.contains('playing') ||
+    matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+    return;
+  const x = clampStretch(from.width / window.innerWidth);
+  const y = clampStretch(from.height / window.innerHeight);
+  // A press during the last one goes on from where it had got to.
+  const running = root.getAnimations().length > 0;
+  const transform = running
+    ? getComputedStyle(root).transform
+    : `scale(${x}, ${y})`;
+  root.getAnimations().forEach((a) => a.cancel());
+  if (transform === 'none' || (x === 1 && y === 1 && !running)) return;
+  root.animate(
+    [
+      { transform, transformOrigin: PINNED },
+      { transform: 'none', transformOrigin: PINNED },
+    ],
+    // The edge travels a few dozen pixels; out is quicker, as exits are.
+    { duration: into ? 220 : 180, easing: SETTLE_EASE }
+  );
+}
+
+function onResize(): void {
+  const from = pageSize;
+  pageSize = { width: window.innerWidth, height: window.innerHeight };
+  const next = expected;
+  expected = null;
+  if (next && performance.now() < next.until) followEdges(next.into, from);
 }
 
 /** Follows the window's full screen, and keeps the browser's menu off the page. */
@@ -39,9 +125,11 @@ export function setupDesktop(): () => void {
     if (m.type === 'fullscreen') windowFullscreen = m.value;
   });
   window.addEventListener('contextmenu', onContextMenu);
+  window.addEventListener('resize', onResize);
   return () => {
     unsubscribe?.();
     window.removeEventListener('contextmenu', onContextMenu);
+    window.removeEventListener('resize', onResize);
   };
 }
 
@@ -89,6 +177,9 @@ export function restartApp(): void {
 
 export const desktopHost: Host = {
   name: 'desktop',
+  get tv() {
+    return appBridge()?.tv === true;
+  },
   device: () => ({ name: appBridge()?.device }),
   player: appEngine,
   playerFeatures: [
@@ -110,7 +201,7 @@ export const desktopHost: Host = {
   },
   back: () => {
     if (!windowFullscreen) return false;
-    appBridge()?.send({ type: 'fullscreen', value: false });
+    sendFullscreen(false);
     return true;
   },
 };

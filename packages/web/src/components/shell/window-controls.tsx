@@ -9,6 +9,7 @@ import {
 } from 'react-icons/vsc';
 import { cn } from '@aiostreams/ui/core/styling';
 import { appBridge } from '@/lib/hosts/shell/bridge';
+import { exitWindowFullscreen } from '@/lib/hosts/shell/desktop';
 import { useAppPip } from '@/lib/hosts/shell/pip';
 import { currentHost } from '@/lib/hosts';
 
@@ -80,7 +81,7 @@ function WindowButtons({
           title="Exit full screen"
           tabIndex={-1}
           className={cn(button, plain)}
-          onClick={() => shell.send({ type: 'fullscreen', value: false })}
+          onClick={exitWindowFullscreen}
         >
           <VscScreenNormal />
         </button>

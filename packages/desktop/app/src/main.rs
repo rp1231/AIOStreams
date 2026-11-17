@@ -62,6 +62,8 @@ pub struct Args {
     devtools: bool,
     debug_port: Option<u16>,
     link: Option<String>,
+    /// The page's TV layout, for a remote or a gamepad on a TV.
+    tv: bool,
 }
 
 fn args() -> Args {
@@ -71,6 +73,7 @@ fn args() -> Args {
         devtools: cfg!(debug_assertions),
         debug_port: None,
         link: None,
+        tv: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -78,6 +81,7 @@ fn args() -> Args {
             "--web" => args.web = it.next(),
             "--web-dir" => args.web_dir = it.next().map(PathBuf::from),
             "--devtools" => args.devtools = true,
+            "--tv" => args.tv = true,
             "--remote-debugging-port" => args.debug_port = it.next().and_then(|p| p.parse().ok()),
             _ => match links::accept(&arg) {
                 Some(link) => args.link = Some(link),
@@ -248,9 +252,10 @@ fn about() -> String {
     )
 }
 
-fn bridge_script() -> String {
+fn bridge_script(tv: bool) -> String {
     include_str!("bridge.js")
         .replace("__PROTOCOL__", &PROTOCOL_VERSION.to_string())
+        .replace("__TV__", &tv.to_string())
         .replace(
             "__VERSION__",
             &serde_json::to_string(env!("CARGO_PKG_VERSION")).unwrap(),
@@ -331,6 +336,7 @@ fn main() {
         download_folder,
         upscaling_hook: data_dir.join("upscaling.glsl"),
     });
+    let bridge = bridge_script(args.tv);
     shell::run(App {
         args,
         web,
@@ -338,7 +344,7 @@ fn main() {
         app_origin,
         data_dir,
         paths,
-        bridge: bridge_script(),
+        bridge,
     });
 }
 

@@ -192,7 +192,7 @@ interface ShellBridge {
   version: string;
   /** `windows`, `macos`, `linux` or `android`. */
   platform: string;
-  /** The Android app on a TV. */
+  /** The Android app on a TV, or the desktop app started with `--tv`. */
   tv?: boolean;
   /** The Android app on a device with a speech recogniser. */
   voice?: boolean;

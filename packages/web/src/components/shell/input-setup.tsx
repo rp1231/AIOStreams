@@ -5,6 +5,7 @@ import type { AnyRouter } from '@tanstack/react-router';
 import { Button } from '@aiostreams/ui/button';
 import { Modal } from '@aiostreams/ui/modal';
 import { currentHost } from '@/lib/hosts';
+import { toggleWindowFullscreen } from '@/lib/hosts/shell/desktop';
 import {
   actionText,
   activate,
@@ -86,6 +87,8 @@ export function InputSetup({ router }: { router: AnyRouter }) {
       onAction('nav.menu', openMenu, fallback),
       onAction('back', () => back(history), fallback),
       onAction('help', () => setHelp(true), fallback),
+      // The player takes its own key first; elsewhere it's the window's.
+      onAction('player.fullscreen', toggleWindowFullscreen, fallback),
     ];
     return () => stops.forEach((stop) => stop());
   }, [router]);

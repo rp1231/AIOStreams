@@ -22,6 +22,7 @@
     protocol: __PROTOCOL__,
     version: __VERSION__,
     platform: __PLATFORM__,
+    tv: __TV__,
     miniPlayer: true,
     pip: __PIP__,
     hours24: __HOURS24__,

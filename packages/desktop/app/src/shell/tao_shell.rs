@@ -39,6 +39,19 @@ pub fn webview_version() -> String {
     wry::webview_version().unwrap_or_else(|_| "missing".into())
 }
 
+/// A TV lays the page out this wide and zooms it to fill the screen.
+const TV_WIDTH: f64 = 1280.0;
+
+/// The page's zoom in the TV layout, as a TV would set it; a window narrower
+/// than a TV page just gets a narrower layout.
+fn tv_zoom(window: &Window) -> f64 {
+    let width = window
+        .inner_size()
+        .to_logical::<f64>(window.scale_factor())
+        .width;
+    (width / TV_WIDTH).max(1.0)
+}
+
 fn page_bounds(size: PhysicalSize<u32>) -> Rect {
     Rect {
         position: PhysicalPosition::new(0, 0).into(),
@@ -47,11 +60,12 @@ fn page_bounds(size: PhysicalSize<u32>) -> Rect {
 }
 
 /// tao keeps a maximized frameless window's content off the taskbar even in
-/// fullscreen, so the window leaves maximized first and goes back after.
-fn set_fullscreen(window: &Window, value: Option<bool>, remaximize: &mut bool) {
+/// fullscreen, so the window leaves maximized first and goes back after. True
+/// when it does, as the window then passes through its restored size.
+fn set_fullscreen(window: &Window, value: Option<bool>, remaximize: &mut bool) -> bool {
     let on = value.unwrap_or(window.fullscreen().is_none());
     if on == window.fullscreen().is_some() {
-        return;
+        return false;
     }
     if on {
         *remaximize = window.is_maximized();
@@ -59,13 +73,19 @@ fn set_fullscreen(window: &Window, value: Option<bool>, remaximize: &mut bool) {
             window.set_maximized(false);
         }
         window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+        *remaximize
     } else {
         window.set_fullscreen(None);
-        if std::mem::take(remaximize) {
+        let back = std::mem::take(remaximize);
+        if back {
             window.set_maximized(true);
         }
+        back
     }
 }
+
+/// Long enough for the window to settle between maximized and full screen.
+const PASSING: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Whether the top middle of a window `width` logical pixels wide at `(x, y)` is on a screen.
 fn on_screen(
@@ -332,10 +352,25 @@ pub fn run(app: App) {
     let size = window.inner_size();
     let _ = webview.set_bounds(page_bounds(size));
     video.resize(size.width, size.height);
+    // Page pixels to the window's, beyond the screen's scale: the video follows the page's zoom.
+    let mut zoom = 1.0;
+    if args.tv {
+        zoom = tv_zoom(&window);
+        let _ = webview.zoom(zoom);
+    }
 
     let mut fullscreen = false;
     let mut maximized = window.is_maximized();
     let mut remaximize = false;
+    // While the window passes between maximized and full screen: until when, and the size it ends at.
+    let mut passing: Option<(Instant, PhysicalSize<u32>)> = None;
+    let mut maximized_size = window.inner_size();
+    // When the system may animate the window's maximizing again.
+    #[cfg(windows)]
+    let mut transitions_back: Option<Instant> = None;
+    // Where the window restored to before full screen borrowed it.
+    #[cfg(windows)]
+    let mut restored_rect: Option<platform::NormalRect> = None;
     let mut pip: Option<Pip> = None;
     let mut save_at: Option<Instant> = None;
     #[cfg(target_os = "macos")]
@@ -361,13 +396,53 @@ pub fn run(app: App) {
         let emit = |message: Outbound| {
             let _ = webview.evaluate_script(&receive_script(&message));
         };
+        // A transition that never reached its size takes the one the window has.
+        if passing.is_some_and(|(until, _)| Instant::now() >= until) {
+            passing = None;
+            let size = window.inner_size();
+            video.resize(size.width, size.height);
+            let _ = webview.set_bounds(page_bounds(size));
+            if args.tv {
+                zoom = tv_zoom(&window);
+                let _ = webview.zoom(zoom);
+            }
+        }
+        // The system animates the window's maximizing again once it has settled.
+        #[cfg(windows)]
+        if transitions_back.is_some_and(|at| Instant::now() >= at) {
+            transitions_back = None;
+            platform::window_transitions(&window, true);
+        }
+        #[cfg(windows)]
+        let wake = [passing.map(|(until, _)| until), transitions_back];
+        #[cfg(not(windows))]
+        let wake = [passing.map(|(until, _)| until)];
+        if let Some(until) = wake.into_iter().flatten().min()
+            && matches!(*flow, ControlFlow::Wait | ControlFlow::WaitUntil(_))
+        {
+            *flow = match *flow {
+                ControlFlow::WaitUntil(at) => ControlFlow::WaitUntil(at.min(until)),
+                _ => ControlFlow::WaitUntil(until),
+            };
+        }
         match event {
+            // The sizes the window passes through on its way would each lay the
+            // page out for a frame: the page keeps the size it had instead.
+            Event::WindowEvent {
+                event: WindowEvent::Resized(size),
+                ..
+            } if passing.is_some_and(|(_, target)| size != target) => {}
             Event::WindowEvent {
                 event: WindowEvent::Resized(size),
                 ..
             } => {
+                passing = None;
                 video.resize(size.width, size.height);
                 let _ = webview.set_bounds(page_bounds(size));
+                if args.tv {
+                    zoom = tv_zoom(&window);
+                    let _ = webview.zoom(zoom);
+                }
                 let now = window.fullscreen().is_some();
                 if now != fullscreen {
                     fullscreen = now;
@@ -456,7 +531,46 @@ pub fn run(app: App) {
                 } else {
                     value
                 };
-                set_fullscreen(&window, value, &mut remaximize)
+                let entering = window.fullscreen().is_none();
+                let before = window.inner_size();
+                #[cfg(windows)]
+                let through_restored = value.is_none_or(|on| on == entering)
+                    && (if entering {
+                        window.is_maximized()
+                    } else {
+                        remaximize
+                    });
+                #[cfg(windows)]
+                if through_restored {
+                    // The system would animate the window down to its restored size
+                    // and back up, which reads as a new window opening.
+                    platform::window_transitions(&window, false);
+                    transitions_back = Some(Instant::now() + PASSING);
+                    // The restored size it passes through is the whole screen, so no
+                    // frame shows a smaller window with the desktop around it.
+                    if entering && let Some(screen) = platform::screen_normal_rect(&window) {
+                        restored_rect = platform::normal_rect(&window);
+                        platform::set_normal_rect(&window, screen);
+                    }
+                }
+                let passed = set_fullscreen(&window, value, &mut remaximize);
+                // Maximized again, the window restores to the user's own size.
+                #[cfg(windows)]
+                if through_restored
+                    && !entering
+                    && let Some(rect) = restored_rect.take()
+                {
+                    platform::set_normal_rect(&window, rect);
+                }
+                if passed {
+                    let target = if entering {
+                        maximized_size = before;
+                        window.current_monitor().map(|m| m.size())
+                    } else {
+                        Some(maximized_size)
+                    };
+                    passing = target.map(|size| (Instant::now() + PASSING, size));
+                }
             }
             Event::UserEvent(UserEvent::Pip(value)) => {
                 let on = value.unwrap_or(pip.is_none());
@@ -482,7 +596,7 @@ pub fn run(app: App) {
                 let scale = platform::page_scale(&webview).unwrap_or(window.scale_factor());
                 #[cfg(not(windows))]
                 let scale = window.scale_factor();
-                video.frame(frame, scale);
+                video.frame(frame, scale * zoom);
             }
             Event::UserEvent(UserEvent::Drag) => {
                 let _ = window.drag_window();

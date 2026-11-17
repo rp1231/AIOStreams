@@ -42,12 +42,12 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, FindWindowExW, FindWindowW, GetClientRect, GetCursorPos,
-    GetParent, GetWindowRect, HWND_BOTTOM, HWND_MESSAGE, HWND_TOP, IsIconic, KillTimer,
-    MB_ICONERROR, MB_OK, MessageBoxW, RegisterClassW, SMTO_ABORTIFHUNG, SW_RESTORE, SW_SHOWNORMAL,
-    SWP_NOACTIVATE, SWP_NOSIZE, SendMessageTimeoutW, SetForegroundWindow, SetTimer, SetWindowPos,
-    ShowWindow, WM_CAPTURECHANGED, WM_COPYDATA, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_SIZING, WM_TIMER, WMSZ_BOTTOM, WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT, WNDCLASSW, WS_CHILD,
-    WS_VISIBLE,
+    GetParent, GetWindowPlacement, GetWindowRect, HWND_BOTTOM, HWND_MESSAGE, HWND_TOP, IsIconic,
+    KillTimer, MB_ICONERROR, MB_OK, MessageBoxW, RegisterClassW, SMTO_ABORTIFHUNG, SW_RESTORE,
+    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOSIZE, SendMessageTimeoutW, SetForegroundWindow, SetTimer,
+    SetWindowPlacement, SetWindowPos, ShowWindow, WINDOWPLACEMENT, WM_CAPTURECHANGED, WM_COPYDATA,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_SIZING, WM_TIMER, WMSZ_BOTTOM, WMSZ_TOP,
+    WMSZ_TOPLEFT, WMSZ_TOPRIGHT, WNDCLASSW, WS_CHILD, WS_VISIBLE,
 };
 
 mod super_resolution;
@@ -56,6 +56,93 @@ pub use super_resolution::{check_super_resolution, super_resolution};
 /// The id on the Start menu shortcut Velopack makes, which gives the system's
 /// media controls the app's name and icon.
 const APP_ID: &str = "velopack.aiostreams-desktop";
+
+/// The system's own animations as the window maximizes and restores, off while
+/// the app passes it through those on its way to and from full screen.
+pub fn window_transitions(window: &Window, on: bool) {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute,
+    };
+    let disabled: i32 = (!on).into();
+    // SAFETY: the window's own handle, and a BOOL the call only reads.
+    unsafe {
+        DwmSetWindowAttribute(
+            window.hwnd() as _,
+            DWMWA_TRANSITIONS_FORCEDISABLED as u32,
+            (&raw const disabled).cast(),
+            size_of::<i32>() as u32,
+        );
+    }
+}
+
+/// Where the window goes when it stops being maximized, in the workspace
+/// coordinates Windows keeps it in.
+pub type NormalRect = windows_sys::Win32::Foundation::RECT;
+
+fn placement(window: &Window) -> Option<WINDOWPLACEMENT> {
+    // SAFETY: WINDOWPLACEMENT is plain data, which the call fills.
+    unsafe {
+        let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
+        placement.length = size_of::<WINDOWPLACEMENT>() as u32;
+        (GetWindowPlacement(window.hwnd() as HWND, &mut placement) != 0).then_some(placement)
+    }
+}
+
+pub fn normal_rect(window: &Window) -> Option<NormalRect> {
+    placement(window).map(|p| p.rcNormalPosition)
+}
+
+/// Changes where a maximized window restores to, without moving it.
+pub fn set_normal_rect(window: &Window, rect: NormalRect) {
+    let Some(mut placement) = placement(window) else {
+        return;
+    };
+    placement.rcNormalPosition = rect;
+    // SAFETY: a placement the call only reads, for the window's own handle.
+    unsafe { SetWindowPlacement(window.hwnd() as HWND, &placement) };
+}
+
+/// The window's whole screen as a place to restore to, which full screen
+/// then covers without the window changing size on the way.
+pub fn screen_normal_rect(window: &Window) -> Option<NormalRect> {
+    // SAFETY: MONITORINFO is plain data, which the call fills.
+    let info = unsafe {
+        let monitor = MonitorFromWindow(window.hwnd() as HWND, MONITOR_DEFAULTTONEAREST);
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = size_of::<MONITORINFO>() as u32;
+        (GetMonitorInfoW(monitor, &mut info) != 0).then_some(info)?
+    };
+    // The window's invisible resize borders sit outside its content, so the
+    // content covers the screen only once they reach past it.
+    let (outer, content) = unsafe {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+        let hwnd = window.hwnd() as HWND;
+        let (mut outer, mut inner): (RECT, RECT) = (std::mem::zeroed(), std::mem::zeroed());
+        GetWindowRect(hwnd, &mut outer);
+        GetClientRect(hwnd, &mut inner);
+        let mut corner = POINT { x: 0, y: 0 };
+        ClientToScreen(hwnd, &mut corner);
+        let content = RECT {
+            left: corner.x,
+            top: corner.y,
+            right: corner.x + inner.right,
+            bottom: corner.y + inner.bottom,
+        };
+        (outer, content)
+    };
+    // Workspace coordinates start at the work area's corner, past a taskbar on the left or top.
+    let (dx, dy) = (
+        info.rcWork.left - info.rcMonitor.left,
+        info.rcWork.top - info.rcMonitor.top,
+    );
+    Some(NormalRect {
+        left: info.rcMonitor.left - (content.left - outer.left) - dx,
+        top: info.rcMonitor.top - (content.top - outer.top) - dy,
+        right: info.rcMonitor.right + (outer.right - content.right) - dx,
+        bottom: info.rcMonitor.bottom + (outer.bottom - content.bottom) - dy,
+    })
+}
 
 /// Set before any window opens.
 pub fn claim_app_id() {
