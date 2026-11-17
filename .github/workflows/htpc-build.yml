@@ -1,0 +1,258 @@
+name: HTPC build
+
+# Builds the Windows desktop app as upstream releases it, with this fork's changes on
+# top, and publishes it to this fork's update feed. An installed app whose
+# AIOSTREAMS_UPDATE_FEED points at that feed updates itself to each build.
+#
+# It builds on the newest upstream desktop release, once that release holds everything
+# the changes were written against; until then a scheduled run waits, and a run started
+# by hand with base `main` builds on upstream's latest code instead.
+on:
+  schedule:
+    # Daily; a run with nothing new to build stops within a minute.
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Upstream ref to build on, such as desktop-v0.26.0 or main; empty for the newest release
+        type: string
+        default: ''
+      force:
+        description: Build even if this base and these changes were built before
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: htpc-build
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: https://github.com/Viren070/AIOStreams.git
+  # The branch on this fork holding the changes, as commits on top of upstream main.
+  CHANGES: feat/desktop-tv-flag
+  # Upstream's names, so an installed copy reads this feed as it reads upstream's.
+  FEED: desktop
+  CHANNEL: win-x64
+  TARGET: x86_64-pc-windows-msvc
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Put the changes on the upstream base
+        id: source
+        env:
+          BASE: ${{ inputs.base }}
+          FORCE: ${{ inputs.force }}
+          RUN: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none "$UPSTREAM" src
+          cd src
+          git fetch --quiet "https://github.com/$GITHUB_REPOSITORY.git" \
+            "+refs/heads/$CHANGES:refs/remotes/fork/changes"
+
+          changes=$(git rev-list --reverse origin/main..fork/changes)
+          if [ -z "$changes" ]; then
+            echo "::error::$CHANGES has no commits on top of upstream main"
+            exit 1
+          fi
+          changes_sha=$(git rev-parse fork/changes)
+          # The upstream code the changes were written against.
+          written_on=$(git merge-base origin/main fork/changes)
+
+          latest=$(git tag --list 'desktop-v*' --sort=-v:refname |
+            grep -E '^desktop-v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          base=${BASE:-$latest}
+          if [ -z "$BASE" ] && ! git merge-base --is-ancestor "$written_on" "$latest"; then
+            echo "::notice::The changes need upstream code newer than $latest; waiting for the next release. Run this by hand with base 'main' to build now."
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$base" in
+            main) ref=origin/main ;;
+            *) ref=$base ;;
+          esac
+          base_sha=$(git rev-parse --verify "$ref^{commit}")
+
+          key="htpc-built-${base_sha:0:12}-${changes_sha:0:12}"
+          if [ "$FORCE" != true ] &&
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$key" >/dev/null 2>&1; then
+            echo "::notice::Already built $CHANGES on $base."
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Versions only rise, so an installed copy takes each build: a release's own
+          # version, or the patch after the newest release for a build of main.
+          if [[ "$base" =~ ^desktop-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            version="${BASH_REMATCH[1]}-htpc.$RUN"
+          else
+            IFS=. read -r major minor patch <<<"${latest#desktop-v}"
+            version="$major.$minor.$((patch + 1))-htpc.$RUN"
+          fi
+
+          git -c advice.detachedHead=false checkout --quiet "$base_sha"
+          if ! git -c user.name=htpc-build -c user.email=htpc-build@users.noreply.github.com \
+            cherry-pick $changes; then
+            git cherry-pick --abort || true
+            echo "::error::The changes in $CHANGES no longer apply to $base. Rebase $CHANGES onto it and run again."
+            exit 1
+          fi
+
+          tool() { grep -oE "$1: [0-9.]+" .github/workflows/desktop-build.yml | head -1 | cut -d' ' -f2; }
+          {
+            echo "skip=false"
+            echo "version=$version"
+            echo "key=$key"
+            echo "base=$base"
+            echo "vpk=$(tool VPK_VERSION)"
+            echo "about=$(tool CARGO_ABOUT_VERSION)"
+          } >>"$GITHUB_OUTPUT"
+          echo "::notice::Building $version: $CHANGES on $base."
+
+      - if: steps.source.outputs.skip == 'false'
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: src/package.json
+
+      - if: steps.source.outputs.skip == 'false'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: src/pnpm-lock.yaml
+
+      - name: Build the page
+        if: steps.source.outputs.skip == 'false'
+        working-directory: src
+        run: |
+          pnpm install --frozen-lockfile --filter "@aiostreams/web..."
+          pnpm -F @aiostreams/web build:standalone
+
+      - if: steps.source.outputs.skip == 'false'
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 9.0.x
+
+      - if: steps.source.outputs.skip == 'false'
+        uses: dtolnay/rust-toolchain@stable
+
+      - if: steps.source.outputs.skip == 'false'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/packages/desktop
+
+      - if: steps.source.outputs.skip == 'false'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@${{ steps.source.outputs.about }}
+
+      - name: List the licences
+        if: steps.source.outputs.skip == 'false'
+        working-directory: src/packages/desktop
+        run: |
+          mkdir -p licences
+          cargo about generate --config about.toml --target "$TARGET" about.hbs -o "licences/$TARGET.html"
+          cargo about generate --config about.toml --target "$TARGET" --format json -o "licences/$TARGET.json"
+
+      - name: Fetch libmpv
+        if: steps.source.outputs.skip == 'false'
+        working-directory: src/packages/desktop
+        shell: pwsh
+        run: ./scripts/fetch-libs.ps1 -Arch x86_64
+
+      - name: Build the app
+        if: steps.source.outputs.skip == 'false'
+        working-directory: src/packages/desktop
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          # The workspace version is the first `version =` in Cargo.toml.
+          $toml = Get-Content Cargo.toml -Raw
+          $toml = ([regex]'(?m)^version = "[^"]*"').Replace($toml, "version = `"$env:VERSION`"", 1)
+          if ($toml -notmatch [regex]::Escape("version = `"$env:VERSION`"")) { throw 'could not set the version' }
+          Set-Content Cargo.toml $toml -NoNewline
+          cargo build --release
+          if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+
+      - name: Stage
+        if: steps.source.outputs.skip == 'false'
+        working-directory: src
+        shell: pwsh
+        run: |
+          $stage = New-Item -ItemType Directory -Force ../stage
+          Copy-Item packages/desktop/target/release/aiostreams-desktop.exe $stage
+          Copy-Item packages/desktop/vendor/x86_64/*.dll $stage
+          Copy-Item packages/desktop/vendor/x86_64/licenses "$stage/licenses" -Recurse
+          Copy-Item packages/desktop/vendor/x86_64/vulkan "$stage/vulkan" -Recurse
+          Copy-Item packages/desktop/THIRD-PARTY.md $stage
+          Copy-Item packages/web/dist-standalone "$stage/web" -Recurse
+          Copy-Item "packages/desktop/licences/$env:TARGET.html" "$stage/third-party-licenses.html"
+          Copy-Item "packages/desktop/licences/$env:TARGET.json" "$stage/third-party-licenses.json"
+
+      - name: Pack
+        if: steps.source.outputs.skip == 'false'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+          VPK_VERSION: ${{ steps.source.outputs.vpk }}
+          BASE: ${{ steps.source.outputs.base }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          gh release view $env:FEED -R $repo *> $null
+          if ($LASTEXITCODE -ne 0) {
+            $notes = "The desktop app with this fork's changes, which an installed copy updates to when its AIOSTREAMS_UPDATE_FEED is https://github.com/$repo/releases/download/$env:FEED/"
+            gh release create $env:FEED -R $repo --latest=false --target $env:GITHUB_SHA `
+              --title 'Desktop app (HTPC)' --notes $notes
+            if ($LASTEXITCODE -ne 0) { throw 'could not create the feed release' }
+          }
+          dotnet tool install -g vpk --version $env:VPK_VERSION
+          $feed = "https://github.com/$repo/releases/download/$env:FEED/"
+          # The last build, for a delta; the first has none.
+          vpk download http --url $feed --channel $env:CHANNEL -o releases
+          if ($LASTEXITCODE -ne 0) { Write-Host 'No earlier build to make a delta from' }
+          vpk pack --packId aiostreams-desktop --packVersion $env:VERSION `
+            --packDir stage --mainExe aiostreams-desktop.exe --packTitle AIOStreams `
+            --packAuthors AIOStreams --icon src/packages/desktop/app/icons/aiostreams.ico `
+            --channel $env:CHANNEL --runtime win-x64 --outputDir releases
+          if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
+          $name = "aiostreams-desktop-$env:CHANNEL"
+          Move-Item "releases/$name-Setup.exe" "releases/$name.exe" -Force
+          Move-Item "releases/$name-Portable.zip" "releases/$name.zip" -Force
+
+      - name: Publish to the feed
+        if: steps.source.outputs.skip == 'false'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+          KEY: ${{ steps.source.outputs.key }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $version = [regex]::Escape($env:VERSION)
+          $files = Get-ChildItem releases -File | Where-Object {
+            $_.Name -like "*$env:CHANNEL*" -and ($_.Extension -ne '.nupkg' -or $_.Name -match "-$version-")
+          }
+          gh release upload $env:FEED $files.FullName -R $repo --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'upload failed' }
+          # Only the newest packages stay: an app further behind takes the full one.
+          $kept = $files.Name
+          $stale = gh release view $env:FEED -R $repo --json assets --jq '.assets[].name' |
+            Where-Object { $_ -match "-$([regex]::Escape($env:CHANNEL))-(full|delta)\.nupkg$" -and $_ -notin $kept }
+          foreach ($asset in $stale) { gh release delete-asset $env:FEED $asset -R $repo --yes }
+          # Marks this base and these changes as built, so the next run skips them.
+          gh api -X POST "repos/$repo/git/refs" -f "ref=refs/tags/$env:KEY" -f "sha=$env:GITHUB_SHA" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh api -X PATCH "repos/$repo/git/refs/tags/$env:KEY" -f "sha=$env:GITHUB_SHA" -F force=true *> $null
+          }
+          "Published $env:VERSION to https://github.com/$repo/releases/tag/$env:FEED" >> $env:GITHUB_STEP_SUMMARY
