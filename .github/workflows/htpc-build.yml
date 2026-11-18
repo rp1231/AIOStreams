@@ -9,8 +9,9 @@ name: HTPC build
 # by hand with base `main` builds on upstream's latest code instead.
 on:
   schedule:
-    # Daily; a run with nothing new to build stops within a minute.
-    - cron: '23 5 * * *'
+    # Twice a day; a run with nothing new to build stops within a minute. GitHub registers
+    # a schedule only from a push to the default branch.
+    - cron: '23 5,17 * * *'
   workflow_dispatch:
     inputs:
       base:
