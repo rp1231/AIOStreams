@@ -3,7 +3,7 @@ import { Select } from '@aiostreams/ui/select';
 import { Switch } from '@aiostreams/ui/switch';
 import { dateFormat } from '@/lib/format';
 import { currentHost } from '@/lib/hosts';
-import { setTvLayout } from '@/lib/hosts/shell/desktop';
+import { setTvLayout, setTvWidth } from '@/lib/hosts/shell/desktop';
 import { HIDDEN_LOCALES, LOCALES, localeName, systemLocale } from '@/lib/i18n';
 import {
   settings,
@@ -17,6 +17,7 @@ import {
   type TimeFormat,
   type TouchNavigation,
   type TvNavigation,
+  type TvWidth,
 } from '@/lib/settings';
 import { SettingsCard } from './_components/settings-card';
 import { startPages } from '@/lib/start-page';
@@ -199,6 +200,7 @@ function sampleTime(cycle: 'h12' | 'h23'): string {
 
 /** The desktop app's TV layout, for a computer by the TV. */
 function LayoutCard() {
+  const [width] = useSetting(settings.app.tvWidth);
   if (currentHost().name !== 'desktop') return null;
   return (
     <SettingsCard name="layout" title={t`Layout`} holds="local">
@@ -209,6 +211,19 @@ function LayoutCard() {
         value={!!currentHost().tv}
         onValueChange={setTvLayout}
       />
+      {currentHost().tv && (
+        <Select
+          label={t`TV size`}
+          help={t`How much fits on the screen. Large is how a TV shows the app; smaller sizes fit more, with smaller text.`}
+          options={[
+            { value: '1280', label: t`Large` },
+            { value: '1600', label: t`Medium` },
+            { value: '1920', label: t`Small` },
+          ]}
+          value={String(width)}
+          onValueChange={(value) => setTvWidth(Number(value) as TvWidth)}
+        />
+      )}
     </SettingsCard>
   );
 }

@@ -194,6 +194,8 @@ interface ShellBridge {
   platform: string;
   /** The Android app on a TV, or the desktop app started with `--tv`. */
   tv?: boolean;
+  /** The page width the desktop app lays the TV layout out at. */
+  tvWidth?: number;
   /** The Android app on a device with a speech recogniser. */
   voice?: boolean;
   /** The app can play in picture-in-picture: the Android app where the device has it, and the Windows app. */

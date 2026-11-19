@@ -158,9 +158,12 @@ pub enum Inbound {
     Fullscreen {
         value: Option<bool>,
     },
-    /// The page's TV layout on or off, which the window zooms to and keeps for the next start.
+    /// The page's TV layout on or off, which the window zooms to and keeps for the next start;
+    /// `width` is the page width the TV layout is laid out at, kept as it was when left out.
     TvLayout {
         value: bool,
+        #[serde(default)]
+        width: Option<u32>,
     },
     /// Shrinks the window to the video, over other windows; `None` toggles.
     Pip {
@@ -532,10 +535,22 @@ mod tests {
         for on in [true, false] {
             let body = format!(r#"{{"type":"tv-layout","value":{on}}}"#);
             assert!(
-                matches!(parse(&body), Some(Inbound::TvLayout { value }) if value == on),
+                matches!(parse(&body), Some(Inbound::TvLayout { value, width: None }) if value == on),
                 "{body}"
             );
         }
+    }
+
+    #[test]
+    fn reads_the_tv_page_width() {
+        assert!(matches!(
+            parse(r#"{"type":"tv-layout","value":true,"width":1920}"#),
+            Some(Inbound::TvLayout {
+                value: true,
+                width: Some(1920)
+            })
+        ));
+        assert!(parse(r#"{"type":"tv-layout","value":true,"width":"wide"}"#).is_none());
     }
 
     #[test]

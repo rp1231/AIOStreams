@@ -28,8 +28,8 @@ use updates::{Command, Updater};
 pub enum UserEvent {
     Emit(String),
     Fullscreen(Option<bool>),
-    /// The page switched its TV layout on or off.
-    TvLayout(bool),
+    /// The page switched its TV layout on or off, or changed its width.
+    TvLayout(Layout),
     Pip(Option<bool>),
     VideoFrame(Option<VideoFrame>),
     Minimize,
@@ -66,6 +66,8 @@ pub struct Args {
     link: Option<String>,
     /// The page's TV layout, for a remote or a gamepad on a TV.
     tv: bool,
+    /// The page width the TV layout is laid out at.
+    tv_width: u32,
 }
 
 fn args() -> Args {
@@ -80,6 +82,7 @@ fn args_from(given: impl IntoIterator<Item = String>) -> Args {
         debug_port: None,
         link: None,
         tv: false,
+        tv_width: TV_WIDTH,
     };
     let mut it = given.into_iter();
     while let Some(arg) = it.next() {
@@ -241,22 +244,55 @@ pub struct Paths {
     tv_layout: PathBuf,
 }
 
-/// The layout the page last chose, if it has.
-fn load_tv_layout(path: &Path) -> Option<bool> {
-    match std::fs::read_to_string(path).ok()?.trim() {
-        "tv" => Some(true),
-        "desktop" => Some(false),
-        _ => None,
-    }
+/// The page width a TV lays the TV layout out at, and the one it starts at here.
+pub const TV_WIDTH: u32 = 1280;
+/// The page widths the TV layout may be laid out at.
+const TV_WIDTHS: std::ops::RangeInclusive<u32> = 960..=3840;
+
+/// The page's layout: the TV layout or not, and the width it lays the TV layout out at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Layout {
+    pub tv: bool,
+    pub width: u32,
+}
+
+/// A width the TV layout may take, or none.
+fn tv_width(width: u32) -> Option<u32> {
+    TV_WIDTHS.contains(&width).then_some(width)
+}
+
+/// The layout the page last chose, if it has: `tv` or `desktop`, then its TV width.
+fn load_tv_layout(path: &Path) -> Option<Layout> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let mut words = text.split_whitespace();
+    let tv = match words.next()? {
+        "tv" => true,
+        "desktop" => false,
+        _ => return None,
+    };
+    let width = words
+        .next()
+        .and_then(|w| w.parse().ok())
+        .and_then(tv_width)
+        .unwrap_or(TV_WIDTH);
+    Some(Layout { tv, width })
 }
 
 /// The layout to open in: the page's last choice, or `--tv` until it has made one.
-fn starting_tv_layout(path: &Path, flag: bool) -> bool {
-    load_tv_layout(path).unwrap_or(flag)
+fn starting_tv_layout(path: &Path, flag: bool) -> Layout {
+    load_tv_layout(path).unwrap_or(Layout {
+        tv: flag,
+        width: TV_WIDTH,
+    })
 }
 
-fn save_tv_layout(path: &Path, on: bool) {
-    if let Err(e) = std::fs::write(path, if on { "tv" } else { "desktop" }) {
+fn save_tv_layout(path: &Path, layout: Layout) {
+    let text = format!(
+        "{} {}",
+        if layout.tv { "tv" } else { "desktop" },
+        layout.width
+    );
+    if let Err(e) = std::fs::write(path, text) {
         log::warn!("could not save the layout to {}: {e}", path.display());
     }
 }
@@ -280,10 +316,11 @@ fn about() -> String {
     )
 }
 
-fn bridge_script(tv: bool) -> String {
+fn bridge_script(layout: Layout) -> String {
     include_str!("bridge.js")
         .replace("__PROTOCOL__", &PROTOCOL_VERSION.to_string())
-        .replace("__TV__", &tv.to_string())
+        .replace("__TV_WIDTH__", &layout.width.to_string())
+        .replace("__TV__", &layout.tv.to_string())
         .replace(
             "__VERSION__",
             &serde_json::to_string(env!("CARGO_PKG_VERSION")).unwrap(),
@@ -367,8 +404,9 @@ fn main() {
     });
     // The layout chosen in the page's settings wins over --tv, which only picks the first one.
     let mut args = args;
-    args.tv = starting_tv_layout(&paths.tv_layout, args.tv);
-    let bridge = bridge_script(args.tv);
+    let layout = starting_tv_layout(&paths.tv_layout, args.tv);
+    (args.tv, args.tv_width) = (layout.tv, layout.width);
+    let bridge = bridge_script(layout);
     shell::run(App {
         args,
         web,
@@ -737,9 +775,14 @@ pub fn handle(
         },
         Inbound::ExternalClose => external.close(),
         Inbound::Fullscreen { value } => send(UserEvent::Fullscreen(value)),
-        Inbound::TvLayout { value } => {
-            save_tv_layout(&paths.tv_layout, value);
-            send(UserEvent::TvLayout(value));
+        Inbound::TvLayout { value, width } => {
+            let width = width
+                .and_then(tv_width)
+                .or_else(|| load_tv_layout(&paths.tv_layout).map(|l| l.width))
+                .unwrap_or(TV_WIDTH);
+            let layout = Layout { tv: value, width };
+            save_tv_layout(&paths.tv_layout, layout);
+            send(UserEvent::TvLayout(layout));
         }
         Inbound::Pip { value } => send(UserEvent::Pip(value)),
         Inbound::PlayerFrame { frame } => {
@@ -910,12 +953,32 @@ mod tests {
         assert_eq!(args.web.as_deref(), Some("http://x"));
     }
 
+    const TV: Layout = Layout {
+        tv: true,
+        width: TV_WIDTH,
+    };
+    const DESKTOP: Layout = Layout {
+        tv: false,
+        width: TV_WIDTH,
+    };
+
     #[test]
     fn saved_layout_reads_back() {
         let scratch = Scratch::new("round-trip");
-        for on in [true, false, true] {
-            save_tv_layout(&scratch.file(), on);
-            assert_eq!(load_tv_layout(&scratch.file()), Some(on));
+        for layout in [
+            TV,
+            DESKTOP,
+            Layout {
+                tv: true,
+                width: 1920,
+            },
+            Layout {
+                tv: false,
+                width: 1600,
+            },
+        ] {
+            save_tv_layout(&scratch.file(), layout);
+            assert_eq!(load_tv_layout(&scratch.file()), Some(layout));
         }
     }
 
@@ -923,17 +986,17 @@ mod tests {
     fn no_saved_layout_follows_the_flag() {
         let scratch = Scratch::new("missing");
         assert_eq!(load_tv_layout(&scratch.file()), None);
-        assert!(starting_tv_layout(&scratch.file(), true));
-        assert!(!starting_tv_layout(&scratch.file(), false));
+        assert_eq!(starting_tv_layout(&scratch.file(), true), TV);
+        assert_eq!(starting_tv_layout(&scratch.file(), false), DESKTOP);
     }
 
     #[test]
     fn saved_layout_wins_over_the_flag() {
         let scratch = Scratch::new("wins");
-        save_tv_layout(&scratch.file(), false);
-        assert!(!starting_tv_layout(&scratch.file(), true));
-        save_tv_layout(&scratch.file(), true);
-        assert!(starting_tv_layout(&scratch.file(), false));
+        save_tv_layout(&scratch.file(), DESKTOP);
+        assert_eq!(starting_tv_layout(&scratch.file(), true), DESKTOP);
+        save_tv_layout(&scratch.file(), TV);
+        assert_eq!(starting_tv_layout(&scratch.file(), false), TV);
     }
 
     #[test]
@@ -942,15 +1005,29 @@ mod tests {
         for text in ["", "yes", "TV", "1"] {
             std::fs::write(scratch.file(), text).unwrap();
             assert_eq!(load_tv_layout(&scratch.file()), None, "{text:?}");
-            assert!(starting_tv_layout(&scratch.file(), true), "{text:?}");
+            assert_eq!(starting_tv_layout(&scratch.file(), true), TV, "{text:?}");
         }
         // A trailing newline, as an editor leaves, still reads.
-        std::fs::write(
-            scratch.file(),
-            "desktop
-",
-        )
-        .unwrap();
-        assert_eq!(load_tv_layout(&scratch.file()), Some(false));
+        std::fs::write(scratch.file(), "desktop\n").unwrap();
+        assert_eq!(load_tv_layout(&scratch.file()), Some(DESKTOP));
+    }
+
+    #[test]
+    fn layout_saved_before_widths_reads_at_the_tv_width() {
+        let scratch = Scratch::new("old");
+        std::fs::write(scratch.file(), "tv").unwrap();
+        assert_eq!(load_tv_layout(&scratch.file()), Some(TV));
+    }
+
+    #[test]
+    fn a_width_out_of_range_reads_as_the_tv_width() {
+        let scratch = Scratch::new("width");
+        for text in ["tv 100", "tv 99999", "tv wide", "tv -1280"] {
+            std::fs::write(scratch.file(), text).unwrap();
+            assert_eq!(load_tv_layout(&scratch.file()), Some(TV), "{text:?}");
+        }
+        assert_eq!(tv_width(1920), Some(1920));
+        assert_eq!(tv_width(959), None);
+        assert_eq!(tv_width(3841), None);
     }
 }

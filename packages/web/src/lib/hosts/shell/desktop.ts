@@ -7,7 +7,7 @@ import {
   type ShellAnswer,
   type VideoOutput,
 } from './bridge';
-import { settings } from '@/lib/settings';
+import { settings, type TvWidth } from '@/lib/settings';
 import { shellDownloads } from './downloads';
 import { appEngine } from './player';
 import { resolveYouTube } from './youtube';
@@ -120,6 +120,23 @@ function onResize(): void {
   if (next && performance.now() < next.until) followEdges(next.into, from);
 }
 
+function sendLayout(): void {
+  appBridge()?.send({
+    type: 'tv-layout',
+    value: settings.app.tvLayout.read(),
+    width: settings.app.tvWidth.read(),
+  });
+}
+
+/**
+ * Lays the TV layout out this wide: the window zooms to it, and the page
+ * follows the new size as it does any resize.
+ */
+export function setTvWidth(width: TvWidth): void {
+  settings.app.tvWidth.write(width);
+  sendLayout();
+}
+
 /**
  * Switches the TV layout and lays the page out again in it: the window zooms
  * to the TV's page width, and the page reloads, as much of it reads the layout
@@ -127,16 +144,19 @@ function onResize(): void {
  */
 export function setTvLayout(on: boolean): void {
   settings.app.tvLayout.write(on);
-  appBridge()?.send({ type: 'tv-layout', value: on });
+  sendLayout();
   window.location.reload();
 }
 
 /** Follows the window's full screen and the chosen layout, and keeps the browser's menu off the page. */
 export function setupDesktop(): () => void {
   // A layout chosen here that the app didn't start in, as when it lost its note of it.
-  const tv = settings.app.tvLayout.read();
-  if (tv !== (appBridge()?.tv === true))
-    appBridge()?.send({ type: 'tv-layout', value: tv });
+  const bridge = appBridge();
+  if (
+    settings.app.tvLayout.read() !== (bridge?.tv === true) ||
+    settings.app.tvWidth.read() !== bridge?.tvWidth
+  )
+    sendLayout();
   const unsubscribe = appBridge()?.subscribe((m) => {
     if (m.type === 'fullscreen') windowFullscreen = m.value;
   });

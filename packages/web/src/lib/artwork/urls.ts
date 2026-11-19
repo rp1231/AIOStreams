@@ -49,9 +49,12 @@ function drawn() {
     measured = {
       reported,
       // A TV lays the page out 1280 wide and fits it to its screen, up or down.
-      ratio: currentHost().tv
-        ? Math.min(TV_MAX_RATIO, (screen.width * dppx) / innerWidth || dppx)
-        : dppx,
+      // The desktop app zooms its own page, which the ratio already holds, and
+      // decodes artwork at the screen's full size without stuttering.
+      ratio:
+        currentHost().tv && currentHost().name !== 'desktop'
+          ? Math.min(TV_MAX_RATIO, (screen.width * dppx) / innerWidth || dppx)
+          : dppx,
       screenPx: Math.max(screen.width, screen.height) * dppx || Infinity,
     };
   }

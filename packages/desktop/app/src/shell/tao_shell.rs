@@ -39,17 +39,14 @@ pub fn webview_version() -> String {
     wry::webview_version().unwrap_or_else(|_| "missing".into())
 }
 
-/// A TV lays the page out this wide and zooms it to fill the screen.
-const TV_WIDTH: f64 = 1280.0;
-
 /// The page's zoom in the TV layout, as a TV would set it; a window narrower
 /// than a TV page just gets a narrower layout.
-fn tv_zoom(window: &Window) -> f64 {
+fn tv_zoom(window: &Window, page_width: u32) -> f64 {
     let width = window
         .inner_size()
         .to_logical::<f64>(window.scale_factor())
         .width;
-    (width / TV_WIDTH).max(1.0)
+    (width / f64::from(page_width)).max(1.0)
 }
 
 fn page_bounds(size: PhysicalSize<u32>) -> Rect {
@@ -356,8 +353,9 @@ pub fn run(app: App) {
     let mut zoom = 1.0;
     // The TV layout, which the page can switch on and off as it runs.
     let mut tv = args.tv;
+    let mut tv_width = args.tv_width;
     if tv {
-        zoom = tv_zoom(&window);
+        zoom = tv_zoom(&window, tv_width);
         let _ = webview.zoom(zoom);
     }
 
@@ -405,7 +403,7 @@ pub fn run(app: App) {
             video.resize(size.width, size.height);
             let _ = webview.set_bounds(page_bounds(size));
             if tv {
-                zoom = tv_zoom(&window);
+                zoom = tv_zoom(&window, tv_width);
                 let _ = webview.zoom(zoom);
             }
         }
@@ -442,7 +440,7 @@ pub fn run(app: App) {
                 video.resize(size.width, size.height);
                 let _ = webview.set_bounds(page_bounds(size));
                 if tv {
-                    zoom = tv_zoom(&window);
+                    zoom = tv_zoom(&window, tv_width);
                     let _ = webview.zoom(zoom);
                 }
                 let now = window.fullscreen().is_some();
@@ -574,9 +572,9 @@ pub fn run(app: App) {
                     passing = target.map(|size| (Instant::now() + PASSING, size));
                 }
             }
-            Event::UserEvent(UserEvent::TvLayout(on)) => {
-                tv = on;
-                zoom = if tv { tv_zoom(&window) } else { 1.0 };
+            Event::UserEvent(UserEvent::TvLayout(layout)) => {
+                (tv, tv_width) = (layout.tv, layout.width);
+                zoom = if tv { tv_zoom(&window, tv_width) } else { 1.0 };
                 let _ = webview.zoom(zoom);
             }
             Event::UserEvent(UserEvent::Pip(value)) => {

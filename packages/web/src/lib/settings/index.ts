@@ -374,6 +374,10 @@ const discord = record(DISCORD_EVENTS, (event) =>
  * How the user likes to watch follows their account; what suits this device's
  * screen, input, sound or hardware stays on it.
  */
+/** Page widths for the desktop app's TV layout: a TV's own, then denser ones. */
+export const TV_WIDTHS = [1280, 1600, 1920] as const;
+export type TvWidth = (typeof TV_WIDTHS)[number];
+
 export const settings = {
   interface: {
     /** A catalog's locale, or `auto` for the system's language. */
@@ -776,6 +780,12 @@ export const settings = {
     tvLayout: device<boolean>(
       'aiostreams-web-app-tv-layout',
       () => appBridge()?.tv === true
+    ),
+    /** How wide the desktop app lays the TV layout out, zoomed to fill the window. */
+    tvWidth: device<TvWidth>(
+      'aiostreams-web-app-tv-width',
+      () => TV_WIDTHS.find((w) => w === appBridge()?.tvWidth) ?? 1280,
+      TV_WIDTHS
     ),
     background: device<boolean>(
       'aiostreams-web-app-background',

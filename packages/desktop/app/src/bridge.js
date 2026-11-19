@@ -23,6 +23,7 @@
     version: __VERSION__,
     platform: __PLATFORM__,
     tv: __TV__,
+    tvWidth: __TV_WIDTH__,
     miniPlayer: true,
     pip: __PIP__,
     hours24: __HOURS24__,
