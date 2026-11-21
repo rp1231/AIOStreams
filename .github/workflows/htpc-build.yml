@@ -14,9 +14,10 @@ name: HTPC build
 # so the feed keeps the last good build.
 on:
   schedule:
-    # Twice a day; a run with nothing new to build stops within a minute. GitHub registers
-    # a schedule only from a push to the default branch.
-    - cron: '23 5,17 * * *'
+    # Every hour, off the hour, so a new upstream release builds within about an hour; a
+    # run with nothing new to build stops within a minute. GitHub registers a schedule only
+    # from a push to the default branch, and starts scheduled runs late when it's busy.
+    - cron: '41 * * * *'
   workflow_dispatch:
     inputs:
       base:
@@ -30,6 +31,8 @@ on:
 
 permissions:
   contents: write
+  # To keep this workflow enabled: see "Keep the schedule on".
+  actions: write
 
 concurrency:
   group: htpc-build
@@ -54,6 +57,13 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      # GitHub turns a public repository's scheduled workflows off after 60 days without
+      # activity in it. Enabling this one again on each scheduled run, as keepalive actions
+      # do, keeps it from lapsing; GitHub also emails a warning before it does.
+      - name: Keep the schedule on
+        if: github.event_name == 'schedule'
+        run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/htpc-build.yml/enable"
+
       - name: Put the changes on the upstream base
         id: source
         env:
