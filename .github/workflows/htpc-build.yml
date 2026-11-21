@@ -7,6 +7,11 @@ name: HTPC build
 # It builds on the newest upstream desktop release, once that release holds everything
 # the changes were written against; until then a scheduled run waits, and a run started
 # by hand with base `main` builds on upstream's latest code instead.
+#
+# The changes don't carry the translation catalogs: the build extracts its strings into
+# them, so upstream's catalog changes never conflict with the changes. A build whose page
+# fails its typecheck, or whose app fails its tests, stops before anything is published,
+# so the feed keeps the last good build.
 on:
   schedule:
     # Twice a day; a run with nothing new to build stops within a minute. GitHub registers
@@ -138,6 +143,9 @@ jobs:
         working-directory: src
         run: |
           pnpm install --frozen-lockfile --filter "@aiostreams/web..."
+          # The changes' new strings, which the page only shows once a catalog lists them.
+          pnpm -F @aiostreams/web i18n:extract
+          pnpm -F @aiostreams/web typecheck
           pnpm -F @aiostreams/web build:standalone
 
       - if: steps.source.outputs.skip == 'false'
@@ -171,6 +179,11 @@ jobs:
         working-directory: src/packages/desktop
         shell: pwsh
         run: ./scripts/fetch-libs.ps1 -Arch x86_64
+
+      - name: Test the app
+        if: steps.source.outputs.skip == 'false'
+        working-directory: src/packages/desktop
+        run: cargo test --workspace --locked
 
       - name: Build the app
         if: steps.source.outputs.skip == 'false'
