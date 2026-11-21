@@ -96,7 +96,7 @@ impl CurrentLayout {
             r#"<meta name="aiostreams-layout" content="{}">"#,
             self.get().text()
         );
-        let at = find(&html, b"<head>").map_or(0, |i| i + b"<head>".len());
+        let at = head_start(&html);
         let mut page = Vec::with_capacity(html.len() + meta.len());
         page.extend_from_slice(&html[..at]);
         page.extend_from_slice(meta.as_bytes());
@@ -105,8 +105,27 @@ impl CurrentLayout {
     }
 }
 
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|w| w == needle)
+/// Where the head's contents start: after `<head>` with any attributes, or where the parser
+/// would open the head itself, after `<html>` or the doctype. Never before the doctype, which
+/// would put the page in quirks mode.
+fn head_start(html: &[u8]) -> usize {
+    ["head", "html", "!doctype"]
+        .iter()
+        .find_map(|tag| tag_end(html, tag))
+        .unwrap_or(0)
+}
+
+/// Just past the first `<tag ...>`, matched without regard to case.
+fn tag_end(html: &[u8], tag: &str) -> Option<usize> {
+    let open = format!("<{tag}");
+    let start = html.windows(open.len()).enumerate().find_map(|(i, w)| {
+        let next = html.get(i + open.len()).copied();
+        (w.eq_ignore_ascii_case(open.as_bytes())
+            && next.is_some_and(|b| b == b'>' || b == b'/' || b.is_ascii_whitespace()))
+        .then_some(i)
+    })?;
+    let close = html[start..].iter().position(|&b| b == b'>')?;
+    Some(start + close + 1)
 }
 
 #[cfg(test)]
@@ -252,13 +271,55 @@ mod tests {
         assert!(page.contains(r#"content="desktop 1600""#), "{page}");
     }
 
-    #[test]
-    fn a_page_without_a_head_still_carries_the_layout() {
+    const META: &str = r#"<meta name="aiostreams-layout" content="tv 1280">"#;
+
+    fn page_of(html: &str) -> String {
         let current = Scratch::new().start(true);
-        let page = String::from_utf8(current.page(b"<p>hi</p>".to_vec())).unwrap();
+        String::from_utf8(current.page(html.as_bytes().to_vec())).unwrap()
+    }
+
+    #[test]
+    fn the_layout_goes_in_a_head_with_attributes_or_capitals() {
         assert_eq!(
-            page,
-            r#"<meta name="aiostreams-layout" content="tv 1280"><p>hi</p>"#
+            page_of(r#"<!DOCTYPE html><HTML><HEAD data-x="1"><title>x</title>"#),
+            format!(r#"<!DOCTYPE html><HTML><HEAD data-x="1">{META}<title>x</title>"#)
+        );
+        // Not a <header>, which only starts like the head.
+        assert_eq!(
+            page_of("<html><body><header></header><head></head>"),
+            format!("<html><body><header></header><head>{META}</head>")
+        );
+    }
+
+    #[test]
+    fn without_a_head_the_layout_goes_after_the_doctype() {
+        assert_eq!(
+            page_of("<!doctype html><html lang=\"en\"><p>hi</p>"),
+            format!("<!doctype html><html lang=\"en\">{META}<p>hi</p>")
+        );
+        assert_eq!(
+            page_of("<!doctype html>\n<p>hi</p>"),
+            format!("<!doctype html>{META}\n<p>hi</p>")
+        );
+        assert_eq!(page_of("<p>hi</p>"), format!("{META}<p>hi</p>"));
+    }
+
+    /// The web app's own page template, which its build keeps the head of: a change upstream
+    /// that moves or reshapes it fails here rather than leaving the page without its layout.
+    #[test]
+    fn the_web_apps_page_carries_the_layout_in_its_head() {
+        let template = include_str!("../../../web/index.html");
+        let page = page_of(template);
+        let meta = page.find(META).expect("the page carries the layout");
+        let head = page
+            .to_ascii_lowercase()
+            .find("<head")
+            .expect("the page has a head");
+        assert!(head < meta, "the layout is inside the head");
+        assert!(
+            page.to_ascii_lowercase()
+                .trim_start()
+                .starts_with("<!doctype")
         );
     }
 }

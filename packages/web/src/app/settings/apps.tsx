@@ -26,7 +26,7 @@ import {
   useDiscordStatus,
   type DiscordStatus,
 } from '@/lib/hosts/shell/desktop';
-import { androidTv } from '@/lib/hosts/shell/bridge';
+import { appBridge } from '@/lib/hosts/shell/bridge';
 import {
   settings,
   useSetting,
@@ -209,7 +209,7 @@ function DiagnosticsRow() {
   // eslint-disable-next-line lingui/no-unlocalized-strings -- the report's own header
   const header = server.version && `AIOStreams ${server.version}`;
   const button = 'w-full rounded-full sm:w-auto';
-  if (!server.reports && androidTv()) return null;
+  if (!server.reports && appBridge()?.tv) return null;
   return (
     <SettingsRow
       label={t`Report a problem`}
@@ -230,7 +230,7 @@ function DiagnosticsRow() {
           </Button>
         )}
         {/* Nothing to paste into on a TV. */}
-        {!androidTv() && (
+        {!appBridge()?.tv && (
           <Button
             intent="gray-outline"
             className={button}

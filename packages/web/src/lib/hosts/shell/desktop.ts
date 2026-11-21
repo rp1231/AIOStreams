@@ -140,7 +140,7 @@ function sendLayout(tv: boolean, width: number): void {
  * any resize.
  */
 export function setTvWidth(width: TvWidth): void {
-  sendLayout(appBridge()?.tv === true, width);
+  sendLayout(appBridge()?.tvLayout === true, width);
 }
 
 /**
@@ -211,7 +211,7 @@ export function restartApp(): void {
 export const desktopHost: Host = {
   name: 'desktop',
   get tv() {
-    return appBridge()?.tv === true;
+    return appBridge()?.tvLayout === true;
   },
   device: () => ({ name: appBridge()?.device }),
   player: appEngine,

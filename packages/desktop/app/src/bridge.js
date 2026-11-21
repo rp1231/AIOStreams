@@ -6,7 +6,7 @@
 
   // The layout as the app started, until the page's own copy in index.html is
   // read, or the app says it changed.
-  let layout = { tv: __TV__, width: __TV_WIDTH__ };
+  let layout = { tv: __TV_LAYOUT__, width: __TV_WIDTH__ };
   let layoutRead = false;
   const currentLayout = () => {
     if (!layoutRead) {
@@ -42,7 +42,7 @@
     protocol: __PROTOCOL__,
     version: __VERSION__,
     platform: __PLATFORM__,
-    get tv() {
+    get tvLayout() {
       return currentLayout().tv;
     },
     get tvWidth() {

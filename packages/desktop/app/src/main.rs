@@ -274,8 +274,8 @@ fn about() -> String {
 fn bridge_script(layout: Layout) -> String {
     include_str!("bridge.js")
         .replace("__PROTOCOL__", &PROTOCOL_VERSION.to_string())
+        .replace("__TV_LAYOUT__", &layout.tv.to_string())
         .replace("__TV_WIDTH__", &layout.width.to_string())
-        .replace("__TV__", &layout.tv.to_string())
         .replace(
             "__VERSION__",
             &serde_json::to_string(env!("CARGO_PKG_VERSION")).unwrap(),

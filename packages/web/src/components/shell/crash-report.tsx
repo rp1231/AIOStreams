@@ -11,7 +11,7 @@ import {
   requestCrashReport,
   type CrashReport,
 } from '@/lib/hosts/shell';
-import { androidTv } from '@/lib/hosts/shell/bridge';
+import { appBridge } from '@/lib/hosts/shell/bridge';
 import { useServerInfo } from '@/lib/jellyfin/server-info';
 import { SendReportDialog, withContext } from '@/components/send-report';
 
@@ -87,7 +87,7 @@ export function CrashReportDialog() {
             <Trans>Save report</Trans>
           </Button>
         )}
-        {!androidTv() && (
+        {!appBridge()?.tv && (
           <Button
             intent="gray-outline"
             className="rounded-full"

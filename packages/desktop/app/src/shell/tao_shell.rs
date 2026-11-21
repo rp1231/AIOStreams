@@ -397,7 +397,8 @@ pub fn run(app: App) {
         let emit = |message: Outbound| {
             let _ = webview.evaluate_script(&receive_script(&message));
         };
-        // A transition that never reached its size takes the one the window has.
+        // A transition that never reached its size takes the one the window has,
+        // and tells the page where it ended up, as a resize that landed would.
         if passing.is_some_and(|(until, _)| Instant::now() >= until) {
             passing = None;
             let size = window.inner_size();
@@ -407,6 +408,19 @@ pub fn run(app: App) {
                 zoom = tv_zoom(&window, tv_width);
                 let _ = webview.zoom(zoom);
             }
+            let now = window.fullscreen().is_some();
+            if now != fullscreen {
+                fullscreen = now;
+                emit(Outbound::Fullscreen { value: now });
+            }
+            let now = window.is_maximized();
+            if now != maximized {
+                maximized = now;
+                emit(Outbound::WindowState { maximized: now });
+            }
+            let at = Instant::now() + SETTLE;
+            save_at = Some(at);
+            *flow = ControlFlow::WaitUntil(at);
         }
         // The system animates the window's maximizing again once it has settled.
         #[cfg(windows)]

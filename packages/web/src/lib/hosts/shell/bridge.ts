@@ -194,13 +194,15 @@ interface ShellBridge {
   version: string;
   /** `windows`, `macos`, `linux` or `android`. */
   platform: string;
-  /**
-   * The Android app on a TV, or the desktop app in the TV layout. The desktop
-   * app owns its layout: it writes it into each page it serves, and says when
-   * the TV size changes with `tv-layout`.
-   */
+  /** The Android app on a TV. */
   tv?: boolean;
-  /** The page width the desktop app lays the TV layout out at. */
+  /**
+   * The desktop app in the TV layout. The app owns its layout: it writes it
+   * into each page it serves, and says when the TV size changes with
+   * `tv-layout`.
+   */
+  tvLayout?: boolean;
+  /** The page width the desktop app lays the TV layout out at, for its TV size. */
   tvWidth?: number;
   /** The Android app on a device with a speech recogniser. */
   voice?: boolean;
@@ -228,12 +230,6 @@ declare global {
 
 export function appBridge(): ShellBridge | undefined {
   return window.aiostreamsApp;
-}
-
-/** The Android app on a TV, which has no keyboard or clipboard to speak of. */
-export function androidTv(): boolean {
-  const bridge = appBridge();
-  return bridge?.platform === 'android' && bridge.tv === true;
 }
 
 /** A line for the app's log, which its problem reports show; the console's in a browser. */

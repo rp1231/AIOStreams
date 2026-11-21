@@ -134,7 +134,7 @@ assembles `AIOStreams.app` from a release build.
 | `--web-dir <dir>`             | Serves the standalone build from this folder                                    |
 | `--devtools`                  | Allows DevTools in a release build                                              |
 | `--remote-debugging-port <n>` | Opens the web view's debugging port, for driving tests                          |
-| `--tv`                        | Opens in the TV layout this time, without saving it (Windows)                   |
+| `--tv`                        | Opens in the TV layout this time, without saving it (zoomed on Windows and macOS) |
 
 `AIOSTREAMS_LIBMPV` and `AIOSTREAMS_WEB_DIR` point at libmpv and the standalone build too, and on
 macOS `AIOSTREAMS_VIDEO_OUTPUT` (`mpv`, `system` or `compatibility`) overrides the chosen output.
@@ -248,7 +248,7 @@ app as data, which it writes into its own folder for mpv to load.
 The TV layout gives the page the layout the TV apps get, zoomed so its page width (`tvWidth`, 1280
 by default) fills the window. The app owns the layout (`app/src/layout.rs`): it keeps it in `layout`
 in its data folder and writes the current one into each `index.html` it serves, which the bridge's
-`tv` and `tvWidth` read. The page asks for a change with `tv-layout`; a new layout reloads the page,
+`tvLayout` and `tvWidth` read. The page asks for a change with `tv-layout`; a new layout reloads the page,
 and a new TV size comes back as `tv-layout`. `--tv` forces the TV layout for one launch without
 saving it.
 
