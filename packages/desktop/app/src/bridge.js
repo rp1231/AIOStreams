@@ -4,10 +4,30 @@
   let idle = true;
   const send = (message) => window.ipc.postMessage(JSON.stringify(message));
 
+  // The layout as the app started, until the page's own copy in index.html is
+  // read, or the app says it changed.
+  let layout = { tv: __TV__, width: __TV_WIDTH__ };
+  let layoutRead = false;
+  const currentLayout = () => {
+    if (!layoutRead) {
+      const meta = document.querySelector('meta[name="aiostreams-layout"]');
+      const [kind, width] = (meta?.content ?? '').split(' ');
+      if (kind === 'tv' || kind === 'desktop') {
+        layout = { tv: kind === 'tv', width: Number(width) || layout.width };
+        layoutRead = true;
+      }
+    }
+    return layout;
+  };
+
   Object.defineProperty(window, '__aiostreamsAppReceive', {
     value(message) {
       const own = message.type === 'player-state' && !message.external;
       if (own && 'idle' in message) idle = message.idle !== false;
+      if (message.type === 'tv-layout') {
+        layout = { tv: message.value, width: message.width };
+        layoutRead = true;
+      }
       for (const listener of listeners) {
         try {
           listener(message);
@@ -22,8 +42,12 @@
     protocol: __PROTOCOL__,
     version: __VERSION__,
     platform: __PLATFORM__,
-    tv: __TV__,
-    tvWidth: __TV_WIDTH__,
+    get tv() {
+      return currentLayout().tv;
+    },
+    get tvWidth() {
+      return currentLayout().width;
+    },
     miniPlayer: true,
     pip: __PIP__,
     hours24: __HOURS24__,

@@ -158,12 +158,11 @@ pub enum Inbound {
     Fullscreen {
         value: Option<bool>,
     },
-    /// The page's TV layout on or off, which the window zooms to and keeps for the next start;
-    /// `width` is the page width the TV layout is laid out at, kept as it was when left out.
+    /// Switches to the TV layout or the desktop layout, which the window zooms to and keeps
+    /// for the next start; `width` is the page width the TV layout is laid out at.
     TvLayout {
         value: bool,
-        #[serde(default)]
-        width: Option<u32>,
+        width: u32,
     },
     /// Shrinks the window to the video, over other windows; `None` toggles.
     Pip {
@@ -423,6 +422,11 @@ pub enum Outbound {
     Fullscreen {
         value: bool,
     },
+    /// The layout the page is now in, after a switch that didn't reload it.
+    TvLayout {
+        value: bool,
+        width: u32,
+    },
     Pip {
         value: bool,
     },
@@ -533,30 +537,33 @@ mod tests {
     #[test]
     fn reads_the_tv_layout_switch_both_ways() {
         for on in [true, false] {
-            let body = format!(r#"{{"type":"tv-layout","value":{on}}}"#);
+            let body = format!(r#"{{"type":"tv-layout","value":{on},"width":1600}}"#);
             assert!(
-                matches!(parse(&body), Some(Inbound::TvLayout { value, width: None }) if value == on),
+                matches!(parse(&body), Some(Inbound::TvLayout { value, width: 1600 }) if value == on),
                 "{body}"
             );
         }
     }
 
     #[test]
-    fn reads_the_tv_page_width() {
-        assert!(matches!(
-            parse(r#"{"type":"tv-layout","value":true,"width":1920}"#),
-            Some(Inbound::TvLayout {
-                value: true,
-                width: Some(1920)
-            })
-        ));
+    fn refuses_a_tv_layout_switch_without_a_value_or_width() {
+        assert!(parse(r#"{"type":"tv-layout"}"#).is_none());
+        assert!(parse(r#"{"type":"tv-layout","value":true}"#).is_none());
+        assert!(parse(r#"{"type":"tv-layout","width":1280}"#).is_none());
+        assert!(parse(r#"{"type":"tv-layout","value":"tv","width":1280}"#).is_none());
         assert!(parse(r#"{"type":"tv-layout","value":true,"width":"wide"}"#).is_none());
     }
 
     #[test]
-    fn refuses_a_tv_layout_switch_without_a_value() {
-        assert!(parse(r#"{"type":"tv-layout"}"#).is_none());
-        assert!(parse(r#"{"type":"tv-layout","value":"tv"}"#).is_none());
+    fn tells_the_page_its_layout() {
+        assert_eq!(
+            Outbound::TvLayout {
+                value: true,
+                width: 1920
+            }
+            .to_json(),
+            r#"{"type":"tv-layout","value":true,"width":1920}"#
+        );
     }
 
     #[test]

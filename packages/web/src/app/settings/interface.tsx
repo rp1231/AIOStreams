@@ -3,7 +3,13 @@ import { Select } from '@aiostreams/ui/select';
 import { Switch } from '@aiostreams/ui/switch';
 import { dateFormat } from '@/lib/format';
 import { currentHost } from '@/lib/hosts';
-import { setTvLayout, setTvWidth } from '@/lib/hosts/shell/desktop';
+import { appBridge } from '@/lib/hosts/shell/bridge';
+import {
+  nearestTvWidth,
+  setTvLayout,
+  setTvWidth,
+  useTvLayout,
+} from '@/lib/hosts/shell/desktop';
 import { HIDDEN_LOCALES, LOCALES, localeName, systemLocale } from '@/lib/i18n';
 import {
   settings,
@@ -198,10 +204,11 @@ function sampleTime(cycle: 'h12' | 'h23'): string {
   }).format(at);
 }
 
-/** The desktop app's TV layout, for a computer by the TV. */
+/** The Windows app's TV layout, for a computer by the TV. */
 function LayoutCard() {
-  const [width] = useSetting(settings.app.tvWidth);
-  if (currentHost().name !== 'desktop') return null;
+  const changed = useTvLayout();
+  if (appBridge()?.platform !== 'windows') return null;
+  const width = nearestTvWidth(changed?.width ?? appBridge()?.tvWidth ?? 0);
   return (
     <SettingsCard name="layout" title={t`Layout`} holds="local">
       <Switch

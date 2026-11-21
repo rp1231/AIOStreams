@@ -149,7 +149,16 @@ impl Shell {
                 }
             }
             // The page lays itself out; this window doesn't zoom it.
-            UserEvent::TvLayout(_) => {}
+            UserEvent::TvLayout { layout, reload } => {
+                if reload {
+                    self.webview.reload();
+                } else {
+                    self.emit(Outbound::TvLayout {
+                        value: layout.tv,
+                        width: layout.width,
+                    });
+                }
+            }
             UserEvent::Minimize => self.window.minimize(),
             UserEvent::Close => self.close(),
             UserEvent::Closed => {}
@@ -319,9 +328,10 @@ pub fn run(app: App) {
     media::start(|key| post(UserEvent::Emit(receive_script(&Outbound::MediaKey { key }))));
 
     let context = webkit6::WebContext::new();
+    let layout = paths.layout.clone();
     context.register_uri_scheme("aiostreams", move |request| {
         let path = request.path().unwrap_or_default();
-        respond(request, serve(web.as_deref(), &path));
+        respond(request, serve(web.as_deref(), &path, &layout));
     });
     if let Some(security) = context.security_manager() {
         security.register_uri_scheme_as_secure("aiostreams");

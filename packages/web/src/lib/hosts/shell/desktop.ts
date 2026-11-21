@@ -7,7 +7,7 @@ import {
   type ShellAnswer,
   type VideoOutput,
 } from './bridge';
-import { settings, type TvWidth } from '@/lib/settings';
+import { TV_WIDTHS, type TvWidth } from '@/lib/settings';
 import { shellDownloads } from './downloads';
 import { appEngine } from './player';
 import { resolveYouTube } from './youtube';
@@ -120,40 +120,40 @@ function onResize(): void {
   if (next && performance.now() < next.until) followEdges(next.into, from);
 }
 
-function sendLayout(): void {
-  appBridge()?.send({
-    type: 'tv-layout',
-    value: settings.app.tvLayout.read(),
-    width: settings.app.tvWidth.read(),
-  });
+/** The desktop app's layout after its last TV size change, if any. */
+export const useTvLayout = bridgeStore('tv-layout').use;
+
+/** The TV size the settings show for a page width: the nearest they offer. */
+export function nearestTvWidth(width: number): TvWidth {
+  return TV_WIDTHS.reduce((near, w) =>
+    Math.abs(w - width) < Math.abs(near - width) ? w : near
+  );
+}
+
+function sendLayout(tv: boolean, width: number): void {
+  appBridge()?.send({ type: 'tv-layout', value: tv, width });
 }
 
 /**
- * Lays the TV layout out this wide: the window zooms to it, and the page
- * follows the new size as it does any resize.
+ * Lays the TV layout out this wide: the app keeps it, zooms the window to it
+ * and says so with `tv-layout`, and the page follows the new size as it does
+ * any resize.
  */
 export function setTvWidth(width: TvWidth): void {
-  settings.app.tvWidth.write(width);
-  sendLayout();
+  sendLayout(appBridge()?.tv === true, width);
 }
 
 /**
- * Switches the TV layout and lays the page out again in it: the window zooms
- * to the TV's page width, and the page reloads, as much of it reads the layout
- * once as it draws.
+ * Switches between the TV layout and the desktop layout. The app keeps it and
+ * loads the page again in it, as much of the page reads the layout once as it
+ * draws.
  */
 export function setTvLayout(on: boolean): void {
-  settings.app.tvLayout.write(on);
-  sendLayout();
-  window.location.reload();
+  sendLayout(on, appBridge()?.tvWidth ?? TV_WIDTHS[0]);
 }
 
 /** Follows the window's full screen and the chosen layout, and keeps the browser's menu off the page. */
 export function setupDesktop(): () => void {
-  // The app keeps its own note of the layout, which this brings in line with
-  // the settings: after a switch the bridge's `tv` is stale, so it can't tell
-  // whether they differ, and sending the same layout again changes nothing.
-  sendLayout();
   const unsubscribe = appBridge()?.subscribe((m) => {
     if (m.type === 'fullscreen') windowFullscreen = m.value;
   });
@@ -211,7 +211,7 @@ export function restartApp(): void {
 export const desktopHost: Host = {
   name: 'desktop',
   get tv() {
-    return settings.app.tvLayout.read();
+    return appBridge()?.tv === true;
   },
   device: () => ({ name: appBridge()?.device }),
   player: appEngine,

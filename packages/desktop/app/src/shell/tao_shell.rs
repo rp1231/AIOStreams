@@ -261,13 +261,14 @@ pub fn run(app: App) {
     });
 
     let mut context = WebContext::new(Some(data_dir.join(platform::WEB_DATA_DIR)));
+    let layout = paths.layout.clone();
     let builder = WebViewBuilder::new_with_web_context(&mut context)
         .with_bounds(page_bounds(size))
         .with_transparent(true)
         .with_devtools(args.devtools)
         .with_initialization_script(bridge)
         .with_custom_protocol("aiostreams".into(), move |_, req: Request<Vec<u8>>| {
-            let served = serve(web.as_deref(), req.uri().path());
+            let served = serve(web.as_deref(), req.uri().path(), &layout);
             Response::builder()
                 .status(served.status)
                 .header("Content-Type", served.content_type)
@@ -352,8 +353,8 @@ pub fn run(app: App) {
     // Page pixels to the window's, beyond the screen's scale: the video follows the page's zoom.
     let mut zoom = 1.0;
     // The TV layout, which the page can switch on and off as it runs.
-    let mut tv = args.tv;
-    let mut tv_width = args.tv_width;
+    let start = paths.layout.get();
+    let (mut tv, mut tv_width) = (start.tv, start.width);
     if tv {
         zoom = tv_zoom(&window, tv_width);
         let _ = webview.zoom(zoom);
@@ -572,10 +573,18 @@ pub fn run(app: App) {
                     passing = target.map(|size| (Instant::now() + PASSING, size));
                 }
             }
-            Event::UserEvent(UserEvent::TvLayout(layout)) => {
+            Event::UserEvent(UserEvent::TvLayout { layout, reload }) => {
                 (tv, tv_width) = (layout.tv, layout.width);
                 zoom = if tv { tv_zoom(&window, tv_width) } else { 1.0 };
                 let _ = webview.zoom(zoom);
+                if reload {
+                    let _ = webview.reload();
+                } else {
+                    emit(Outbound::TvLayout {
+                        value: layout.tv,
+                        width: layout.width,
+                    });
+                }
             }
             Event::UserEvent(UserEvent::Pip(value)) => {
                 let on = value.unwrap_or(pip.is_none());

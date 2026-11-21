@@ -92,6 +92,8 @@ export type ShellMessage =
       devices: { name: string; description: string }[] | null;
     }
   | { type: 'fullscreen'; value: boolean }
+  /** The desktop app's layout after a TV size change, which doesn't reload the page. */
+  | { type: 'tv-layout'; value: boolean; width: number }
   | { type: 'pip'; value: boolean }
   /** A tap on the small video, a drag of it starting, where it is as it drags, or where it let go, in the page's pixels. */
   | { type: 'player-frame'; event: 'tap' | 'grabbed' }
@@ -194,12 +196,11 @@ interface ShellBridge {
   platform: string;
   /**
    * The Android app on a TV, or the desktop app in the TV layout. The desktop
-   * app sets it once as it starts, so after a switch in the settings it holds
-   * the old layout until the app restarts; `settings.app.tvLayout` has the
-   * current one.
+   * app owns its layout: it writes it into each page it serves, and says when
+   * the TV size changes with `tv-layout`.
    */
   tv?: boolean;
-  /** The page width the desktop app started laying the TV layout out at, as for `tv`. */
+  /** The page width the desktop app lays the TV layout out at. */
   tvWidth?: number;
   /** The Android app on a device with a speech recogniser. */
   voice?: boolean;
