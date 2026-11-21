@@ -134,6 +134,7 @@ assembles `AIOStreams.app` from a release build.
 | `--web-dir <dir>`             | Serves the standalone build from this folder                                    |
 | `--devtools`                  | Allows DevTools in a release build                                              |
 | `--remote-debugging-port <n>` | Opens the web view's debugging port, for driving tests                          |
+| `--tv`                        | Starts in the TV layout until it's switched in the settings (Windows and macOS) |
 
 `AIOSTREAMS_LIBMPV` and `AIOSTREAMS_WEB_DIR` point at libmpv and the standalone build too, and on
 macOS `AIOSTREAMS_VIDEO_OUTPUT` (`mpv`, `system` or `compatibility`) overrides the chosen output.
@@ -243,6 +244,10 @@ allowlist in `core/src/bridge.rs`: pages can play http(s) URLs, not local files 
 can start the user's own mpv, but only the one the app found or the user picked in the system's file
 dialog, and what it sends there passes the same allowlist. A subtitle file the user adds reaches the
 app as data, which it writes into its own folder for mpv to load.
+
+The TV layout gives the page the layout the TV apps get, zoomed so its page width (`tvWidth`, 1280
+by default) fills the window. The bridge's `tv` and `tvWidth` say which layout the app started in;
+the page switches with a `tv-layout` message, which the app keeps in `layout` in its data folder.
 
 ## Acknowledgements
 

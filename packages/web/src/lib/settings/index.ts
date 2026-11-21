@@ -370,14 +370,14 @@ const discord = record(DISCORD_EVENTS, (event) =>
   )
 );
 
-/*
- * How the user likes to watch follows their account; what suits this device's
- * screen, input, sound or hardware stays on it.
- */
 /** Page widths for the desktop app's TV layout: a TV's own, then denser ones. */
 export const TV_WIDTHS = [1280, 1600, 1920] as const;
 export type TvWidth = (typeof TV_WIDTHS)[number];
 
+/*
+ * How the user likes to watch follows their account; what suits this device's
+ * screen, input, sound or hardware stays on it.
+ */
 export const settings = {
   interface: {
     /** A catalog's locale, or `auto` for the system's language. */

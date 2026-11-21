@@ -150,13 +150,10 @@ export function setTvLayout(on: boolean): void {
 
 /** Follows the window's full screen and the chosen layout, and keeps the browser's menu off the page. */
 export function setupDesktop(): () => void {
-  // A layout chosen here that the app didn't start in, as when it lost its note of it.
-  const bridge = appBridge();
-  if (
-    settings.app.tvLayout.read() !== (bridge?.tv === true) ||
-    settings.app.tvWidth.read() !== bridge?.tvWidth
-  )
-    sendLayout();
+  // The app keeps its own note of the layout, which this brings in line with
+  // the settings: after a switch the bridge's `tv` is stale, so it can't tell
+  // whether they differ, and sending the same layout again changes nothing.
+  sendLayout();
   const unsubscribe = appBridge()?.subscribe((m) => {
     if (m.type === 'fullscreen') windowFullscreen = m.value;
   });
