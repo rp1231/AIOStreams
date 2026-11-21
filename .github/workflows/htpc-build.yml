@@ -145,6 +145,8 @@ jobs:
           pnpm install --frozen-lockfile --filter "@aiostreams/web..."
           # The changes' new strings, which the page only shows once a catalog lists them.
           pnpm -F @aiostreams/web i18n:extract
+          # The page's types include core's, which its build writes.
+          pnpm -F @aiostreams/core build
           pnpm -F @aiostreams/web typecheck
           pnpm -F @aiostreams/web build:standalone
 
